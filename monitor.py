@@ -199,16 +199,35 @@ class FileEventHandler(FileSystemEventHandler):
         """Handle file creation events"""
         if not event.is_directory:
             self._log_event('created', event.src_path)
-    
+            self._analyze_file_entropy(event.src_path)
+
     def on_modified(self, event: FileSystemEvent) -> None:
         """Handle file modification events"""
         if not event.is_directory:
             self._log_event('modified', event.src_path)
-    
+            self._analyze_file_entropy(event.src_path)
+
     def on_deleted(self, event: FileSystemEvent) -> None:
         """Handle file deletion events"""
         if not event.is_directory:
             self._log_event('deleted', event.src_path)
+
+    def _analyze_file_entropy(self, file_path: str) -> None:
+        """
+        Analyze file entropy for suspicious patterns
+
+        Args:
+            file_path: Path to file to analyze
+        """
+        try:
+            # Import here to avoid circular imports
+            from fme import analyze_file_event
+
+            # Analyze the file (will trigger alerts if suspicious)
+            analyze_file_event(file_path)
+
+        except Exception as e:
+            log_error(self.logger, e, f"Entropy analysis for {file_path}")
 
 
 class FileMonitor:
