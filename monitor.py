@@ -206,6 +206,7 @@ class FileEventHandler(FileSystemEventHandler):
         if not event.is_directory:
             self._log_event('modified', event.src_path)
             self._analyze_file_entropy(event.src_path)
+            self._check_burst_activity(event.src_path)
 
     def on_deleted(self, event: FileSystemEvent) -> None:
         """Handle file deletion events"""
@@ -228,6 +229,23 @@ class FileEventHandler(FileSystemEventHandler):
 
         except Exception as e:
             log_error(self.logger, e, f"Entropy analysis for {file_path}")
+
+    def _check_burst_activity(self, file_path: str) -> None:
+        """
+        Check for burst activity patterns
+
+        Args:
+            file_path: Path to file to check
+        """
+        try:
+            # Import here to avoid circular imports
+            from abt import check_burst_event
+
+            # Check for burst activity (will trigger alerts if detected)
+            check_burst_event(file_path)
+
+        except Exception as e:
+            log_error(self.logger, e, f"Burst analysis for {file_path}")
 
 
 class FileMonitor:
