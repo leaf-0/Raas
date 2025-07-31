@@ -1,0 +1,310 @@
+/**
+ * Custom CSS for FME-ABT Detector Dashboard
+ * Tailwind CSS overrides and custom styles
+ */
+
+/* Dark mode variables */
+:root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafc;
+    --text-primary: #1f2937;
+    --text-secondary: #6b7280;
+    --border-color: #e5e7eb;
+    --accent-color: #3b82f6;
+}
+
+.dark {
+    --bg-primary: #1f2937;
+    --bg-secondary: #111827;
+    --text-primary: #f9fafb;
+    --text-secondary: #d1d5db;
+    --border-color: #374151;
+    --accent-color: #60a5fa;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--text-secondary);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-primary);
+}
+
+/* Smooth transitions */
+* {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+/* Custom button styles */
+.btn-primary {
+    @apply bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors duration-200;
+}
+
+.btn-secondary {
+    @apply bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded-md transition-colors duration-200;
+}
+
+.dark .btn-secondary {
+    @apply bg-gray-700 hover:bg-gray-600 text-gray-200;
+}
+
+.btn-danger {
+    @apply bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-md transition-colors duration-200;
+}
+
+.btn-success {
+    @apply bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md transition-colors duration-200;
+}
+
+/* Card styles */
+.card {
+    @apply bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700;
+}
+
+.card-header {
+    @apply px-6 py-4 border-b border-gray-200 dark:border-gray-700;
+}
+
+.card-body {
+    @apply p-6;
+}
+
+/* Table styles */
+.table-container {
+    @apply overflow-x-auto shadow ring-1 ring-black ring-opacity-5 rounded-lg;
+}
+
+.table {
+    @apply min-w-full divide-y divide-gray-200 dark:divide-gray-700;
+}
+
+.table thead {
+    @apply bg-gray-50 dark:bg-gray-700;
+}
+
+.table th {
+    @apply px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider;
+}
+
+.table tbody {
+    @apply bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700;
+}
+
+/* Form styles */
+.form-group {
+    @apply mb-4;
+}
+
+.form-label {
+    @apply block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2;
+}
+
+.form-input {
+    @apply block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm 
+           bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100
+           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
+}
+
+.form-select {
+    @apply block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm 
+           bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100
+           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
+}
+
+/* Status indicators */
+.status-indicator {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+.status-online {
+    @apply bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100;
+}
+
+.status-offline {
+    @apply bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100;
+}
+
+.status-warning {
+    @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100;
+}
+
+/* Severity badges */
+.severity-low {
+    @apply bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100;
+}
+
+.severity-medium {
+    @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100;
+}
+
+.severity-high {
+    @apply bg-orange-100 text-orange-800 dark:bg-orange-800 dark:text-orange-100;
+}
+
+.severity-critical {
+    @apply bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100;
+}
+
+/* Event type badges */
+.event-created {
+    @apply bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100;
+}
+
+.event-modified {
+    @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100;
+}
+
+.event-deleted {
+    @apply bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100;
+}
+
+/* Loading spinner */
+.spinner {
+    @apply inline-block w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin;
+}
+
+/* Notification styles */
+.notification {
+    @apply fixed top-4 right-4 p-4 rounded-md shadow-lg z-50 max-w-sm;
+}
+
+.notification-success {
+    @apply bg-green-500 text-white;
+}
+
+.notification-error {
+    @apply bg-red-500 text-white;
+}
+
+.notification-warning {
+    @apply bg-yellow-500 text-white;
+}
+
+.notification-info {
+    @apply bg-blue-500 text-white;
+}
+
+/* Chart containers */
+.chart-container {
+    @apply w-full h-96 bg-white dark:bg-gray-800 rounded-lg p-4;
+}
+
+/* Responsive utilities */
+@media (max-width: 640px) {
+    .table-container {
+        @apply text-sm;
+    }
+    
+    .card-body {
+        @apply p-4;
+    }
+    
+    .chart-container {
+        @apply h-64;
+    }
+}
+
+/* Custom animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.pulse {
+    animation: pulse 2s infinite;
+}
+
+/* Toggle switch */
+.toggle-switch {
+    @apply relative inline-block w-12 h-6;
+}
+
+.toggle-switch input {
+    @apply opacity-0 w-0 h-0;
+}
+
+.toggle-slider {
+    @apply absolute cursor-pointer top-0 left-0 right-0 bottom-0 bg-gray-300 dark:bg-gray-600 rounded-full transition-all duration-300;
+}
+
+.toggle-slider:before {
+    @apply absolute content-[''] h-5 w-5 left-0.5 bottom-0.5 bg-white rounded-full transition-all duration-300;
+}
+
+input:checked + .toggle-slider {
+    @apply bg-blue-600;
+}
+
+input:checked + .toggle-slider:before {
+    @apply transform translate-x-6;
+}
+
+/* Metric cards */
+.metric-card {
+    @apply bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg p-6 shadow-lg;
+}
+
+.metric-card-secondary {
+    @apply bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg p-6 shadow-lg;
+}
+
+.metric-card-warning {
+    @apply bg-gradient-to-r from-yellow-500 to-yellow-600 text-white rounded-lg p-6 shadow-lg;
+}
+
+.metric-card-danger {
+    @apply bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg p-6 shadow-lg;
+}
+
+/* Sidebar styles */
+.sidebar {
+    @apply fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-gray-800 shadow-lg transform transition-transform duration-300 ease-in-out;
+}
+
+.sidebar-open {
+    @apply translate-x-0;
+}
+
+.sidebar-closed {
+    @apply -translate-x-full;
+}
+
+/* Mobile menu overlay */
+.mobile-overlay {
+    @apply fixed inset-0 bg-black bg-opacity-50 z-40;
+}
+
+/* Print styles */
+@media print {
+    .no-print {
+        display: none !important;
+    }
+    
+    .card {
+        @apply shadow-none border border-gray-300;
+    }
+    
+    .chart-container {
+        @apply h-auto;
+    }
+}

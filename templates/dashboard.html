@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FME-ABT Detector Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#6b7280'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
+    <!-- Navigation Header -->
+    <nav class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <!-- Logo and Title -->
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <h1 class="text-xl font-bold text-gray-900 dark:text-white">
+                            FME-ABT Detector
+                        </h1>
+                    </div>
+                    <div class="ml-4 flex items-center space-x-2">
+                        <div id="connection-status" class="h-3 w-3 bg-green-400 rounded-full"></div>
+                        <span class="text-sm text-gray-600 dark:text-gray-400">Connected</span>
+                    </div>
+                </div>
+                
+                <!-- Controls -->
+                <div class="flex items-center space-x-4">
+                    <!-- Auto-refresh toggle -->
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm text-gray-600 dark:text-gray-400">Auto-refresh</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="auto-refresh-toggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    
+                    <!-- Manual refresh -->
+                    <button id="refresh-btn" class="btn-secondary">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                    </button>
+                    
+                    <!-- Theme toggle -->
+                    <button id="theme-toggle" class="btn-secondary">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                  d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Status Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="metric-card">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-blue-100">Total Events</p>
+                        <p class="text-2xl font-bold" id="total-events">0</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="metric-card-warning">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.268 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-yellow-100">Total Alerts</p>
+                        <p class="text-2xl font-bold" id="total-alerts">0</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="metric-card-secondary">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-green-100">System Status</p>
+                        <p class="text-lg font-bold">Active</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="metric-card-danger">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-red-100">Threat Level</p>
+                        <p class="text-lg font-bold">Low</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- Entropy Trend Chart -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white">File Activity Trend</h3>
+                </div>
+                <div class="card-body">
+                    <div id="entropy-trend-chart" class="chart-container"></div>
+                </div>
+            </div>
+            
+            <!-- Burst Activity Heatmap -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white">Burst Activity Heatmap</h3>
+                </div>
+                <div class="card-body">
+                    <div id="burst-heatmap-chart" class="chart-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Tables Section -->
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+            <!-- Recent Events Table -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white">Recent File Events</h3>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-container">
+                        <table class="table" id="events-table">
+                            <thead>
+                                <tr>
+                                    <th>File Path</th>
+                                    <th>Event Type</th>
+                                    <th>Timestamp</th>
+                                    <th>Process</th>
+                                    <th>Size</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Events will be populated by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Recent Alerts Table -->
+            <div class="card">
+                <div class="card-header flex justify-between items-center">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white">Recent Alerts</h3>
+                    <select id="severity-filter" class="form-select w-32">
+                        <option value="all">All Severities</option>
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="critical">Critical</option>
+                    </select>
+                </div>
+
+        <!-- Controls Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <!-- Threshold Tuning -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white">Threshold Tuning</h3>
+                </div>
+                <div class="card-body">
+                    <form id="threshold-form" class="space-y-4">
+                        <div class="form-group">
+                            <label for="entropy-threshold" class="form-label">Entropy Threshold</label>
+                            <input type="number" id="entropy-threshold" name="entropy_threshold"
+                                   class="form-input" step="0.1" min="0" max="8" value="7.0">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="variance-threshold" class="form-label">Variance Threshold</label>
+                            <input type="number" id="variance-threshold" name="variance_threshold"
+                                   class="form-input" step="0.1" min="0" value="0.5">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="chi-square-threshold" class="form-label">Chi-Square Threshold</label>
+                            <input type="number" id="chi-square-threshold" name="chi_square_threshold"
+                                   class="form-input" step="100" min="0" value="1000">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="burst-multiplier" class="form-label">Burst Multiplier</label>
+                            <input type="number" id="burst-multiplier" name="burst_multiplier"
+                                   class="form-input" step="0.1" min="1" value="3.0">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="baseline-days" class="form-label">Baseline Days</label>
+                            <input type="number" id="baseline-days" name="baseline_days"
+                                   class="form-input" min="1" max="30" value="7">
+                        </div>
+
+                        <button type="submit" class="btn-primary w-full">Update Thresholds</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Process Whitelist -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white">Process Whitelist</h3>
+                </div>
+                <div class="card-body">
+                    <form id="process-whitelist-form" class="space-y-4">
+                        <div class="form-group">
+                            <label for="process-name" class="form-label">Process Name</label>
+                            <input type="text" id="process-name" name="value"
+                                   class="form-input" placeholder="e.g., notepad.exe">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="process-action" class="form-label">Action</label>
+                            <select id="process-action" name="action" class="form-select">
+                                <option value="add">Add to Whitelist</option>
+                                <option value="remove">Remove from Whitelist</option>
+                            </select>
+                        </div>
+
+                        <button type="submit" class="btn-primary w-full">Update Process Whitelist</button>
+                    </form>
+
+                    <div class="mt-4">
+                        <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Current Whitelist:</h4>
+                        <div id="process-whitelist" class="text-sm text-gray-600 dark:text-gray-400">
+                            <!-- Will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Directory Whitelist -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white">Directory Whitelist</h3>
+                </div>
+                <div class="card-body">
+                    <form id="directory-whitelist-form" class="space-y-4">
+                        <div class="form-group">
+                            <label for="directory-path" class="form-label">Directory Path</label>
+                            <input type="text" id="directory-path" name="value"
+                                   class="form-input" placeholder="e.g., C:\Windows\System32">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="directory-action" class="form-label">Action</label>
+                            <select id="directory-action" name="action" class="form-select">
+                                <option value="add">Add to Whitelist</option>
+                                <option value="remove">Remove from Whitelist</option>
+                            </select>
+                        </div>
+
+                        <button type="submit" class="btn-primary w-full">Update Directory Whitelist</button>
+                    </form>
+
+                    <div class="mt-4">
+                        <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Current Whitelist:</h4>
+                        <div id="directory-whitelist" class="text-sm text-gray-600 dark:text-gray-400">
+                            <!-- Will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics and Export Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- System Statistics -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white">System Statistics</h3>
+                </div>
+                <div class="card-body">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Event Types (24h)</h4>
+                            <div id="event-types" class="space-y-1">
+                                <!-- Will be populated by JavaScript -->
+                            </div>
+                        </div>
+
+                        <div>
+                            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Top Processes</h4>
+                            <div id="top-processes" class="space-y-1">
+                                <!-- Will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Export and Actions -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white">Export & Actions</h3>
+                </div>
+                <div class="card-body">
+                    <div class="space-y-4">
+                        <div>
+                            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Dataset Export</h4>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                                Export all events and alerts as CSV for analysis
+                            </p>
+                            <button id="export-btn" class="btn-success w-full">
+                                <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                </svg>
+                                Export Dataset
+                            </button>
+                        </div>
+
+                        <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
+                            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">System Info</h4>
+                            <div class="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                                <div class="flex justify-between">
+                                    <span>Last Refresh:</span>
+                                    <span id="last-refresh">--:--:--</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Monitoring:</span>
+                                    <span class="text-green-600 dark:text-green-400">Active</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Version:</span>
+                                    <span>1.0.0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load JavaScript -->
+    <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>
+                <div class="card-body p-0">
+                    <div class="table-container">
+                        <table class="table" id="alerts-table">
+                            <thead>
+                                <tr>
+                                    <th>Severity</th>
+                                    <th>Type</th>
+                                    <th>Message</th>
+                                    <th>Timestamp</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Alerts will be populated by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
