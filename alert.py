@@ -15,12 +15,13 @@ import threading
 import time
 import tkinter as tk
 from tkinter import messagebox
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Set
 from datetime import datetime
+from collections import defaultdict
 
 import psutil
 
-from utils import setup_logger, log_error, get_timestamp
+from utils import setup_logger, log_error, get_timestamp, get_db_connection
 
 
 class AlertManager:
@@ -31,7 +32,7 @@ class AlertManager:
     def __init__(self, alerts_db_path: str = "alerts.db"):
         """
         Initialize alert manager
-        
+
         Args:
             alerts_db_path: Path to alerts database
         """
@@ -40,10 +41,14 @@ class AlertManager:
         self.mitigation_enabled = True
         self.vss_monitor_active = False
         self.vss_monitor_thread = None
-        
+
+        # Alert deduplication tracking
+        self.recent_alerts = defaultdict(list)
+        self.alert_cooldown = 300  # 5 minutes cooldown for duplicate alerts
+
         # Initialize alerts database
         self._init_alerts_database()
-        
+
         # Start Volume Shadow Copy monitoring
         self.start_vss_monitoring()
         
@@ -52,7 +57,11 @@ class AlertManager:
         Initialize SQLite database for alert logging
         """
         try:
-            conn = sqlite3.connect(self.alerts_db_path)
+            conn = get_db_connection(self.alerts_db_path)
+            if not conn:
+                self.logger.error("Failed to connect to alerts database")
+                return
+
             try:
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS alerts (
@@ -68,32 +77,70 @@ class AlertManager:
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
-                
+
                 # Create index for better query performance
                 conn.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_alert_timestamp 
+                    CREATE INDEX IF NOT EXISTS idx_alert_timestamp
                     ON alerts(timestamp)
                 ''')
-                
+
                 conn.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_alert_type 
+                    CREATE INDEX IF NOT EXISTS idx_alert_type
                     ON alerts(alert_type)
                 ''')
-                
-                conn.commit()
+
+                # Index for deduplication
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_alert_dedup
+                    ON alerts(alert_type, file_path, timestamp)
+                ''')
+
                 self.logger.info(f"Alerts database initialized: {self.alerts_db_path}")
             finally:
                 conn.close()
-                
+
         except Exception as e:
             log_error(self.logger, e, "Initializing alerts database")
     
+    def _is_duplicate_alert(self, alert_type: str, file_path: str = None) -> bool:
+        """
+        Check if this alert is a duplicate within the cooldown period
+
+        Args:
+            alert_type: Type of alert
+            file_path: Associated file path
+
+        Returns:
+            True if this is a duplicate alert
+        """
+        try:
+            current_time = get_timestamp()
+            alert_key = f"{alert_type}:{file_path or 'global'}"
+
+            # Clean old alerts beyond cooldown period
+            self.recent_alerts[alert_key] = [
+                timestamp for timestamp in self.recent_alerts[alert_key]
+                if current_time - timestamp < self.alert_cooldown
+            ]
+
+            # Check if we have recent alerts of this type
+            if self.recent_alerts[alert_key]:
+                return True
+
+            # Add current alert to tracking
+            self.recent_alerts[alert_key].append(current_time)
+            return False
+
+        except Exception as e:
+            log_error(self.logger, e, "Checking duplicate alert")
+            return False
+
     def _log_alert(self, alert_type: str, message: str, file_path: str = None,
                    process_id: int = None, process_name: str = None,
                    severity: str = "medium", action_taken: str = None) -> None:
         """
-        Log alert to database
-        
+        Log alert to database with deduplication
+
         Args:
             alert_type: Type of alert (entropy, burst, vss, etc.)
             message: Alert message
@@ -104,24 +151,32 @@ class AlertManager:
             action_taken: Action taken in response
         """
         try:
+            # Check for duplicate alerts
+            if self._is_duplicate_alert(alert_type, file_path):
+                self.logger.debug(f"Skipping duplicate alert: {alert_type} - {file_path}")
+                return
+
             timestamp = get_timestamp()
-            
-            conn = sqlite3.connect(self.alerts_db_path)
+
+            conn = get_db_connection(self.alerts_db_path)
+            if not conn:
+                self.logger.error("Failed to connect to alerts database for logging")
+                return
+
             try:
                 conn.execute('''
-                    INSERT INTO alerts 
-                    (alert_type, message, file_path, process_id, process_name, 
+                    INSERT INTO alerts
+                    (alert_type, message, file_path, process_id, process_name,
                      severity, timestamp, action_taken)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (alert_type, message, file_path, process_id, process_name,
                       severity, timestamp, action_taken))
-                
-                conn.commit()
+
             finally:
                 conn.close()
-                
+
             self.logger.info(f"Alert logged: {alert_type} - {message}")
-            
+
         except Exception as e:
             log_error(self.logger, e, f"Logging alert: {alert_type}")
     
@@ -285,84 +340,209 @@ class AlertManager:
         except Exception as e:
             log_error(self.logger, e, "Triggering burst alert")
     
+    def _get_process_risk_score(self, proc_info: Dict, file_path: str) -> float:
+        """
+        Calculate risk score for a process based on various factors
+
+        Args:
+            proc_info: Process information
+            file_path: Associated file path
+
+        Returns:
+            Risk score (0.0 to 1.0, higher = more suspicious)
+        """
+        try:
+            risk_score = 0.0
+            proc_name = proc_info.get('name', '').lower()
+            proc_exe = proc_info.get('exe', '').lower()
+
+            # Factor 1: Recently created process (higher risk)
+            create_time = proc_info.get('create_time', 0)
+            age_hours = (time.time() - create_time) / 3600
+            if age_hours < 1:
+                risk_score += 0.3
+            elif age_hours < 24:
+                risk_score += 0.1
+
+            # Factor 2: Suspicious process names
+            suspicious_names = [
+                'encrypt', 'crypt', 'lock', 'ransom', 'crypto',
+                'locker', 'vault', 'secure', 'protect'
+            ]
+            if any(name in proc_name for name in suspicious_names):
+                risk_score += 0.4
+
+            # Factor 3: Unusual locations
+            if proc_exe:
+                suspicious_paths = [
+                    'temp', 'tmp', 'appdata\\local\\temp',
+                    'downloads', 'desktop', 'documents'
+                ]
+                if any(path in proc_exe for path in suspicious_paths):
+                    risk_score += 0.2
+
+            # Factor 4: No digital signature (simplified check)
+            if proc_exe and not proc_exe.startswith('c:\\windows\\'):
+                risk_score += 0.1
+
+            return min(risk_score, 1.0)
+
+        except Exception as e:
+            log_error(self.logger, e, "Calculating process risk score")
+            return 0.0
+
     def _consider_process_termination(self, file_path: str, detection_result: Dict) -> None:
         """
-        Consider terminating processes for high-confidence detections
-        
+        Consider terminating processes for high-confidence detections using risk scoring
+
         Args:
             file_path: File path associated with detection
             detection_result: Detection result data
         """
         try:
-            # This is a simplified heuristic - in practice, you'd want more
-            # sophisticated logic to determine when to terminate processes
-            
-            # Look for recently active processes that might be responsible
+            # Enhanced heuristics for process termination decisions
             suspicious_processes = []
-            
-            for proc in psutil.process_iter(['pid', 'name', 'create_time', 'exe']):
+            file_dir = os.path.dirname(file_path)
+
+            for proc in psutil.process_iter(['pid', 'name', 'create_time', 'exe', 'open_files']):
                 try:
                     proc_info = proc.info
-                    
-                    # Skip system processes
-                    if proc_info['name'].lower() in ['system', 'csrss.exe', 'winlogon.exe']:
+                    proc_name = proc_info['name'].lower()
+
+                    # Skip critical system processes
+                    critical_processes = {
+                        'system', 'csrss.exe', 'winlogon.exe', 'services.exe',
+                        'lsass.exe', 'wininit.exe', 'smss.exe', 'dwm.exe'
+                    }
+                    if proc_name in critical_processes:
                         continue
-                    
-                    # Look for recently created processes
-                    if time.time() - proc_info['create_time'] < 3600:  # Last hour
-                        suspicious_processes.append(proc_info)
-                        
+
+                    # Check if process has file handles in the same directory
+                    has_file_access = False
+                    try:
+                        open_files = proc.open_files()
+                        for open_file in open_files:
+                            if os.path.dirname(open_file.path) == file_dir:
+                                has_file_access = True
+                                break
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        # If we can't check, consider recent processes
+                        if time.time() - proc_info['create_time'] < 1800:  # 30 minutes
+                            has_file_access = True
+
+                    if has_file_access:
+                        risk_score = self._get_process_risk_score(proc_info, file_path)
+                        if risk_score > 0.5:  # High risk threshold
+                            suspicious_processes.append((proc_info, risk_score))
+
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-            
-            # For demo purposes, we'll be very conservative and not actually terminate
-            # In a real implementation, you'd have more sophisticated detection logic
+
+            # Sort by risk score (highest first)
+            suspicious_processes.sort(key=lambda x: x[1], reverse=True)
+
             if suspicious_processes:
-                self.logger.warning(f"Found {len(suspicious_processes)} recently active processes, "
-                                  f"but not terminating (safety measure)")
-                
-                # Log what we would have done
+                # For safety, we'll still be conservative but provide better logging
+                top_process, top_score = suspicious_processes[0]
+
+                self.logger.warning(
+                    f"High-risk process detected: {top_process['name']} "
+                    f"(PID: {top_process['pid']}, Risk: {top_score:.2f})"
+                )
+
+                # In a production environment, you might terminate processes with score > 0.8
+                action = "evaluation_only"
+                if top_score > 0.8 and self.mitigation_enabled:
+                    # Uncomment the next line to enable actual termination in production
+                    # action = "terminated" if self._terminate_process(top_process['pid'], top_process['name']) else "termination_failed"
+                    action = "would_terminate_in_production"
+
                 self._log_alert(
                     alert_type="mitigation",
-                    message=f"Would consider terminating {len(suspicious_processes)} processes",
+                    message=f"High-risk process: {top_process['name']} (risk={top_score:.2f})",
                     file_path=file_path,
-                    severity="high",
-                    action_taken="evaluation_only"
+                    process_id=top_process['pid'],
+                    process_name=top_process['name'],
+                    severity="critical" if top_score > 0.8 else "high",
+                    action_taken=action
                 )
-            
+
         except Exception as e:
             log_error(self.logger, e, "Considering process termination")
     
     def _monitor_vss_deletion(self) -> None:
         """
-        Monitor for Volume Shadow Copy deletion attempts
+        Monitor for Volume Shadow Copy deletion attempts using various methods
         """
         try:
             while self.vss_monitor_active:
                 try:
-                    # Check for vssadmin processes
+                    # Check for various VSS deletion processes
                     for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                         try:
                             proc_info = proc.info
-                            
-                            if (proc_info['name'].lower() == 'vssadmin.exe' and 
-                                proc_info['cmdline']):
-                                
-                                cmdline = ' '.join(proc_info['cmdline']).lower()
-                                
-                                # Check for shadow copy deletion commands
-                                if 'delete' in cmdline and 'shadows' in cmdline:
-                                    self._trigger_vss_alert(proc_info)
-                                    
+                            proc_name = proc_info['name'].lower()
+
+                            if not proc_info['cmdline']:
+                                continue
+
+                            cmdline = ' '.join(proc_info['cmdline']).lower()
+
+                            # Check for various VSS deletion methods
+                            vss_detected = False
+
+                            # 1. vssadmin.exe delete shadows
+                            if (proc_name == 'vssadmin.exe' and
+                                'delete' in cmdline and 'shadows' in cmdline):
+                                vss_detected = True
+
+                            # 2. wbadmin delete backup/catalog
+                            elif (proc_name == 'wbadmin.exe' and
+                                  ('delete' in cmdline and ('backup' in cmdline or 'catalog' in cmdline))):
+                                vss_detected = True
+
+                            # 3. diskshadow script execution
+                            elif (proc_name == 'diskshadow.exe' and
+                                  ('delete' in cmdline or 'script' in cmdline)):
+                                vss_detected = True
+
+                            # 4. PowerShell VSS deletion commands
+                            elif (proc_name in ['powershell.exe', 'pwsh.exe'] and
+                                  any(keyword in cmdline for keyword in [
+                                      'get-wmiobject win32_shadowcopy',
+                                      'remove-wmiobject',
+                                      'delete()',
+                                      'win32_shadowcopy | foreach',
+                                      'vssadmin delete shadows'
+                                  ])):
+                                vss_detected = True
+
+                            # 5. WMIC shadow copy deletion
+                            elif (proc_name == 'wmic.exe' and
+                                  'shadowcopy' in cmdline and 'delete' in cmdline):
+                                vss_detected = True
+
+                            # 6. CMD executing VSS commands
+                            elif (proc_name == 'cmd.exe' and
+                                  any(keyword in cmdline for keyword in [
+                                      'vssadmin delete',
+                                      'wbadmin delete',
+                                      'wmic shadowcopy delete'
+                                  ])):
+                                vss_detected = True
+
+                            if vss_detected:
+                                self._trigger_vss_alert(proc_info)
+
                         except (psutil.NoSuchProcess, psutil.AccessDenied):
                             continue
-                            
+
                     time.sleep(2)  # Check every 2 seconds
-                    
+
                 except Exception as e:
                     log_error(self.logger, e, "VSS monitoring loop")
                     time.sleep(5)  # Wait longer on error
-                    
+
         except Exception as e:
             log_error(self.logger, e, "VSS monitoring thread")
     
@@ -432,29 +612,33 @@ class AlertManager:
     def get_recent_alerts(self, hours: int = 24) -> List[Dict]:
         """
         Get recent alerts from database
-        
+
         Args:
             hours: Number of hours to look back
-            
+
         Returns:
             List of recent alerts
         """
         try:
             cutoff_time = time.time() - (hours * 3600)
-            
-            conn = sqlite3.connect(self.alerts_db_path)
+
+            conn = get_db_connection(self.alerts_db_path)
+            if not conn:
+                self.logger.error("Failed to connect to alerts database")
+                return []
+
             try:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute('''
-                    SELECT * FROM alerts 
-                    WHERE timestamp > ? 
+                    SELECT * FROM alerts
+                    WHERE timestamp > ?
                     ORDER BY timestamp DESC
                 ''', (cutoff_time,))
-                
+
                 return [dict(row) for row in cursor.fetchall()]
             finally:
                 conn.close()
-                
+
         except Exception as e:
             log_error(self.logger, e, "Getting recent alerts")
             return []

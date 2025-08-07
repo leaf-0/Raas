@@ -41,7 +41,8 @@ def setup_logger(name: str, log_file: str = "errors.log") -> logging.Logger:
     try:
         # Create directory if it doesn't exist
         log_dir = os.path.dirname(log_file) if os.path.dirname(log_file) else '.'
-        os.makedirs(log_dir, exist_ok=True)
+        if not ensure_directory_exists(log_dir):
+            raise Exception(f"Cannot create log directory: {log_dir}")
 
         file_handler = RotatingFileHandler(
             log_file,

@@ -131,11 +131,24 @@ class EntropyAnalyzer:
         if not data:
             return 0.0
 
-        # For large datasets, use sampling to optimize performance
+        # For large datasets, use adaptive sampling to optimize performance
         if len(data) > 10000:
-            # Sample every nth byte to maintain distribution characteristics
-            sample_rate = len(data) // 5000
+            # Adaptive sampling: ensure minimum samples while being efficient
+            # For very large files, limit sample rate to prevent missing patterns
+            base_sample_rate = len(data) // 5000
+            sample_rate = min(base_sample_rate, 50)  # Max skip 50 bytes
+            sample_rate = max(sample_rate, 1)  # Min skip 1 byte
             sampled_data = data[::sample_rate]
+
+            # Ensure we have enough data for reliable entropy calculation
+            if len(sampled_data) < 1000:
+                # Take multiple smaller samples from different parts of the file
+                chunk_size = len(data) // 10
+                sampled_data = b''
+                for i in range(0, len(data), chunk_size):
+                    chunk_end = min(i + chunk_size, len(data))
+                    chunk_sample_size = min(100, chunk_end - i)
+                    sampled_data += data[i:i + chunk_sample_size]
         else:
             sampled_data = data
 

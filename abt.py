@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 from collections import defaultdict, Counter
 from pathlib import Path
 
-from utils import setup_logger, log_error, get_timestamp
+from utils import setup_logger, log_error, get_timestamp, get_db_connection
 
 
 class BurstDetector:
@@ -199,7 +199,11 @@ class BurstDetector:
             # Get events from the last baseline_days
             cutoff_time = current_time - (self.baseline_days * 24 * 3600)
 
-            conn = sqlite3.connect(self.db_path)
+            conn = get_db_connection(self.db_path)
+            if not conn:
+                self.logger.error("Failed to connect to database for baseline update")
+                return
+
             try:
                 conn.row_factory = sqlite3.Row
 
@@ -323,7 +327,11 @@ class BurstDetector:
             dir_category = self._get_directory_category(file_path)
             type_category = self._get_file_type_category(file_path)
             
-            conn = sqlite3.connect(self.db_path)
+            conn = get_db_connection(self.db_path)
+            if not conn:
+                self.logger.error("Failed to connect to database for burst check")
+                return False
+
             try:
                 # Check if table exists
                 cursor = conn.execute('''
@@ -333,11 +341,16 @@ class BurstDetector:
                 if not cursor.fetchone():
                     events_in_window = 0
                 else:
-                    # Count events for same directory category and file type
+                    # Count events for same directory category and file type with granular filtering
+                    file_dir = os.path.dirname(file_path)
+                    file_ext = os.path.splitext(file_path)[1].lower()
+
                     cursor = conn.execute('''
                         SELECT COUNT(*) as count FROM file_events
-                        WHERE timestamp > ? AND event_type = 'modified'
-                    ''', (window_start,))
+                        WHERE timestamp > ?
+                        AND event_type = 'modified'
+                        AND (path LIKE ? OR path LIKE ?)
+                    ''', (window_start, f"{file_dir}%", f"%{file_ext}"))
 
                     events_in_window = cursor.fetchone()[0]
             finally:
@@ -392,8 +405,8 @@ class BurstDetector:
                 
                 # Import here to avoid circular imports
                 try:
-                    from alert import AlertManager
-                    alert_manager = AlertManager()
+                    from alert import get_alert_manager
+                    alert_manager = get_alert_manager()
                     alert_manager.trigger_burst_alert(result)
                 except ImportError:
                     self.logger.warning("Alert module not available")

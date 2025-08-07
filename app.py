@@ -14,6 +14,7 @@ from typing import Dict, List, Any
 
 from flask import Flask, render_template, request, jsonify, send_file
 from flask_socketio import SocketIO, emit
+from flask_cors import CORS
 import plotly.graph_objs as go
 import plotly.utils
 
@@ -29,6 +30,10 @@ class DashboardApp:
         """Initialize the Flask application"""
         self.app = Flask(__name__)
         self.app.config['SECRET_KEY'] = 'fme-abt-detector-secret-key'
+
+        # Enable CORS for all routes to allow FME Sentinel Watch to connect
+        CORS(self.app, origins=["http://localhost:5173", "http://127.0.0.1:5173"])
+
         self.socketio = SocketIO(self.app, cors_allowed_origins="*")
         self.logger = setup_logger(__name__)
         
@@ -95,21 +100,32 @@ class DashboardApp:
         
         @self.app.route('/api/alerts')
         def get_alerts():
-            """Get recent alerts"""
+            """Get recent alerts - compatible with both dashboard and FME Sentinel Watch"""
             try:
                 hours = request.args.get('hours', 24, type=int)
                 severity = request.args.get('severity', None)
-                
+
                 alerts = self._get_recent_alerts(hours, severity)
-                return jsonify({
-                    'success': True,
-                    'data': alerts,
-                    'count': len(alerts)
-                })
-                
+
+                # Check if this is a request from FME Sentinel Watch (expects direct array)
+                user_agent = request.headers.get('User-Agent', '')
+                if 'axios' in user_agent.lower() or request.headers.get('Accept') == 'application/json':
+                    # Return direct array for FME Sentinel Watch
+                    return jsonify(alerts)
+                else:
+                    # Return wrapped response for dashboard
+                    return jsonify({
+                        'success': True,
+                        'data': alerts,
+                        'count': len(alerts)
+                    })
+
             except Exception as e:
                 log_error(self.logger, e, "Getting alerts")
-                return jsonify({'success': False, 'error': str(e)})
+                if 'axios' in request.headers.get('User-Agent', '').lower():
+                    return jsonify([])  # Return empty array for FME Sentinel Watch
+                else:
+                    return jsonify({'success': False, 'error': str(e)})
         
         @self.app.route('/api/charts/entropy-trend')
         def entropy_trend_chart():
@@ -225,6 +241,80 @@ class DashboardApp:
                 'success': True,
                 'config': self.config
             })
+
+        @self.app.route('/api/status')
+        def get_status():
+            """Get system status for FME Sentinel Watch"""
+            try:
+                # Get recent events to determine if monitoring is active
+                recent_events = self._get_recent_events(1, 10)  # Last hour
+                alerts = self._get_recent_alerts(24)  # Last 24 hours
+
+                # Determine monitoring state based on recent activity
+                monitoring_state = 'running' if recent_events else 'stopped'
+
+                status = {
+                    'monitoring_state': monitoring_state,
+                    'monitored_directories': ['./monitored'],  # Default monitored directory
+                    'alerts_count': len(alerts),
+                    'last_check': datetime.now().isoformat()
+                }
+
+                return jsonify(status)
+
+            except Exception as e:
+                log_error(self.logger, e, "Getting system status")
+                return jsonify({
+                    'monitoring_state': 'stopped',
+                    'monitored_directories': [],
+                    'alerts_count': 0,
+                    'last_check': datetime.now().isoformat()
+                })
+
+        @self.app.route('/api/memory')
+        def get_memory_usage():
+            """Get memory usage information"""
+            try:
+                import psutil
+                memory = psutil.virtual_memory()
+
+                memory_info = {
+                    'total': memory.total,
+                    'used': memory.used,
+                    'percentage': memory.percent
+                }
+
+                return jsonify(memory_info)
+
+            except Exception as e:
+                log_error(self.logger, e, "Getting memory usage")
+                return jsonify({
+                    'total': 0,
+                    'used': 0,
+                    'percentage': 0
+                })
+
+        @self.app.route('/api/mitigation', methods=['POST'])
+        def toggle_mitigation():
+            """Toggle mitigation on/off"""
+            try:
+                data = request.get_json()
+                enabled = data.get('enabled', False)
+
+                # Import alert manager and toggle mitigation
+                from alert import get_alert_manager
+                alert_manager = get_alert_manager()
+                alert_manager.set_mitigation_enabled(enabled)
+
+                return jsonify({
+                    'success': True,
+                    'message': f'Mitigation {"enabled" if enabled else "disabled"}',
+                    'enabled': enabled
+                })
+
+            except Exception as e:
+                log_error(self.logger, e, "Toggling mitigation")
+                return jsonify({'success': False, 'error': str(e)})
     
     def _setup_socketio_events(self):
         """Setup SocketIO events for real-time updates"""
@@ -299,39 +389,54 @@ class DashboardApp:
         try:
             if not os.path.exists(self.alerts_db):
                 return []
-                
+
             cutoff_time = time.time() - (hours * 3600)
-            
+
             conn = sqlite3.connect(self.alerts_db)
             try:
                 conn.row_factory = sqlite3.Row
-                
+
                 query = '''
-                    SELECT * FROM alerts 
+                    SELECT * FROM alerts
                     WHERE timestamp > ?
                 '''
                 params = [cutoff_time]
-                
+
                 if severity:
                     query += ' AND severity = ?'
                     params.append(severity)
-                
+
                 query += ' ORDER BY timestamp DESC'
-                
+
                 cursor = conn.execute(query, params)
-                
+
                 alerts = []
                 for row in cursor.fetchall():
                     alert = dict(row)
+                    # Format timestamp for both dashboard and FME Sentinel Watch
                     alert['formatted_time'] = datetime.fromtimestamp(
                         alert['timestamp']
                     ).strftime('%Y-%m-%d %H:%M:%S')
+
+                    # Ensure timestamp is also in ISO format for FME Sentinel Watch
+                    alert['timestamp'] = datetime.fromtimestamp(
+                        alert['timestamp']
+                    ).isoformat()
+
+                    # Ensure required fields exist with defaults
+                    alert['file_path'] = alert.get('file_path', '')
+                    alert['process_id'] = alert.get('process_id', 0)
+                    alert['process_name'] = alert.get('process_name', '')
+                    alert['action_taken'] = alert.get('action_taken', 'none')
+                    alert['alert_type'] = alert.get('alert_type', 'unknown')
+                    alert['severity'] = alert.get('severity', 'medium')
+
                     alerts.append(alert)
-                
+
                 return alerts
             finally:
                 conn.close()
-                
+
         except Exception as e:
             log_error(self.logger, e, "Getting recent alerts")
             return []
